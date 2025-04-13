@@ -8,8 +8,8 @@ class Condition:
         self.feature = feature
         self.threshold = threshold
 
-class Node:  
-    # Helper class: Store decision nodes (feature, threshold, left/right children)
+class TrainNode:  
+    # Helper class: Store training and conditions informations
     def __init__(self, samples: np.ndarray, condition: Condition = None):
             self.samples = samples
             self.n_samples = len(samples)
@@ -18,10 +18,20 @@ class Node:
             self.impurity = 1
             self.left = None
             self.right = None
-             
+
+class TreeNode:
+    """Lightweight tree node for prediction (no training data)."""
+    def __init__(self, condition: Condition = None, class_label: int = -1):
+        self.condition = condition
+        self.class_label = class_label  # Only populated for leaf nodes
+        self.left = None  # TreeNode
+        self.right = None  # TreeNode
+
+    def is_leaf(self) -> bool:
+        return self.class_label != -1          
 
 class DecisionTree:  
-    def __init__(self, max_depth: int = None, min_samples_split: int = 2, min_samples_leaf: int = 1):  
+    def __init__(self, max_depth: int = None, min_samples_split: int = 2, min_samples_leaf: int = 1, criterion: str = "gini"):  
         # Initialize tree constraints (depth, min samples to split)  
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -29,12 +39,18 @@ class DecisionTree:
         self.root = None
         self.n_classes = 0
 
-    def fit(self, X: np.ndarray, y: np.ndarray):  
+        criterions = {
+            "gini": self._gini,
+            "entropy": self._entropy
+        }
+        self.criterion = criterions[criterion]
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> float:  
         # build the tree by splitting nodes using Gini impurity
         self.n_classes = len(np.unique(y))
-        self.root = Node(np.arange(len(X))) # We will store indices to keep track of sampels per node during training
+        self.root = TrainNode(np.arange(len(X))) # We will store indices to keep track of sampels per node during training
         depth=0
-        q: Deque[Node] = deque()
+        q: Deque[TrainNode] = deque()
         q.append(self.root)
         
         #We stop the tree at max_depth
@@ -48,7 +64,7 @@ class DecisionTree:
                 node.class_majority = values[np.argmax(counts)]
 
                 # The node becomes a leaf if it has a perfect impurity
-                node_impurity = self._gini(y[node.samples])
+                node_impurity = self.criterion(y[node.samples])
                 node.impurity = node_impurity
                 if node_impurity == 0:
                     continue
@@ -68,20 +84,23 @@ class DecisionTree:
 
                 mask = X[node.samples][:, node.condition.feature] <= node.condition.threshold
 
-                node.left = Node(node.samples[mask])
-                node.right = Node(node.samples[~mask])
+                node.left = TrainNode(node.samples[mask])
+                node.right = TrainNode(node.samples[~mask])
                     
                 q.append(node.left)
                 q.append(node.right)
             depth+=1
-        print(self)
+        
+        # Build the final tree
+        self.root = self._build_prediction_tree(self.root)
+
         predictions = self.predict(X)
         accuracy = np.sum(predictions==y)/len(y)
 
         return accuracy
 
 
-    def predict(self, X: np.ndarray):  
+    def predict(self, X: np.ndarray) -> list:  
         # Traverse the tree to predict class labels for input X
         predictions = []
 
@@ -92,18 +111,28 @@ class DecisionTree:
                     root = root.left
                 else:
                     root = root.right
-            predictions.append(root.class_majority)
+            predictions.append(root.class_label)
         
         return predictions
 
-    def _gini(self, y: np.ndarray):  
+    def _gini(self, y: np.ndarray) -> float:  
         # Helper: Compute Gini impurity for a set of labels 
         _, counts = np.unique(y, return_counts=True)
-        weighted_counts = counts/len(y)
-        
-        return 1-np.sum(np.square(weighted_counts))
+        proportions = counts/len(y)
+        gini = 1-np.sum(np.square(proportions))
 
-    def _best_split(self, parent_impurity: float, X: np.ndarray, y: np.ndarray):  
+        return gini
+    
+    def _entropy(self, y: np.ndarray) -> float:
+        # Helper: Compute entropy for a set of labels
+        _, counts = np.unique(y, return_counts=True)
+        proportions = counts / len(y)
+        entropies = proportions*np.log2(proportions)
+        entropy = -np.sum(entropies)
+
+        return entropy
+
+    def _best_split(self, parent_impurity: float, X: np.ndarray, y: np.ndarray) -> Condition:  
         # Helper: Find the best feature/threshold to split the data
         n_features = X.shape[1]
         max_gain = -np.inf
@@ -123,8 +152,8 @@ class DecisionTree:
                 if len(right_mask)<self.min_samples_leaf or len(left_mask) < self.min_samples_leaf:
                     continue
 
-                left_impurity = self._gini(left_mask)
-                right_impurity = self._gini(right_mask)
+                left_impurity = self.criterion(left_mask)
+                right_impurity = self.criterion(right_mask)
 
                 weighted_impurity = (len(left_mask)/len(y))*left_impurity + (len(right_mask)/len(y))*right_impurity
 
@@ -137,55 +166,34 @@ class DecisionTree:
             return None
         else:
             return Condition(feature=best_feature, threshold=best_threshold)
-        
-    def __str__(self):
-        if not self.root:
-            return "Empty tree"
-        
-        lines = []
-        stack = [(self.root, 0, True, True)]  # (node, depth, is_last, is_root)
-        
+    
+    def _build_prediction_tree(self, train_root: TrainNode) -> TreeNode:
+        if not train_root:
+            return None
+            
+        # Initialize prediction tree root
+        pred_root = TreeNode()
+        stack = [(train_root, pred_root)]
+
         while stack:
-            node, depth, is_last, is_root = stack.pop()
+            train_node, pred_node = stack.pop()
             
-            # =====================================================================
-            # 1. Build the prefix for this node (connectors + indentation)
-            # =====================================================================
-            prefix = ""
-            if not is_root:
-                # Indentation from previous levels
-                prefix += "    " * (depth - 1)
+            # Handle leaf nodes
+            if not train_node.left and not train_node.right:
+                pred_node.class_label = train_node.class_majority
+                continue
                 
-                # Add connector (├── or └── )
-                prefix += "└── " if is_last else "├── "
+            # Copy split condition
+            pred_node.condition = train_node.condition
             
-            # =====================================================================
-            # 2. Build the node's description line
-            # =====================================================================
-            if node.left is None and node.right is None:
-                # Leaf node
-                line = f"{prefix}Leaf: class {node.class_majority} (samples={node.n_samples}, impurity={node.impurity:.3f})"
-            else:
-                # Decision node
-                line = (f"{prefix}[Feature {node.condition.feature} <= {node.condition.threshold:.2f}] "
-                        f"(samples={node.n_samples}, impurity={node.impurity:.3f})")
+            # Process right child first (stack is LIFO)
+            if train_node.right:
+                pred_node.right = TreeNode()
+                stack.append((train_node.right, pred_node.right))
             
-            lines.append(line)
-            
-            # =====================================================================
-            # 3. Prepare children for processing (reverse order for stack LIFO)
-            # =====================================================================
-            children = []
-            if node.right: children.append((node.right, False))  # Right child first
-            if node.left: children.append((node.left, True))     # Left child last
-            
-            # Push children to stack with their metadata
-            for idx, (child, is_last_child) in enumerate(children):
-                stack.append((
-                    child,             # Node to process
-                    depth + 1,         # Next depth level
-                    is_last_child,     # Is last child of its parent?
-                    False              # No longer root
-                ))
-        
-        return "\n".join(lines)
+            # Process left child
+            if train_node.left:
+                pred_node.left = TreeNode()
+                stack.append((train_node.left, pred_node.left))
+
+        return pred_root
