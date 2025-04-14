@@ -31,7 +31,7 @@ class TreeNode:
         return self.class_label != -1          
 
 class DecisionTree:  
-    def __init__(self, max_depth: int = None, min_samples_split: int = 2, min_samples_leaf: int = 1, criterion: str = "gini"):  
+    def __init__(self, max_depth: int = 3, min_samples_split: int = 2, min_samples_leaf: int = 1, criterion: str = "gini"):  
         # Initialize tree constraints (depth, min samples to split)  
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
