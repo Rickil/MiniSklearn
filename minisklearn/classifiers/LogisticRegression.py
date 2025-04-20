@@ -1,7 +1,8 @@
 import numpy as np
+from minisklearn import metrics
 
 class LogisticRegression:
-    def __init__(self, learning_rate : float = 0.01, n_iters: int = 1000):  
+    def __init__(self, learning_rate : float = 0.01, n_iters: int = 1000, metric="accuracy"):  
         # Initialize weights (coefficients) and hyperparameters  
         self.weights = None
         self.bias = 0
@@ -9,6 +10,7 @@ class LogisticRegression:
         self.n_samples = 0 # Samples size
         self.learning_rate = learning_rate
         self.n_iters = n_iters
+        self.metric = metric
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> tuple[float, float]:  
         # X: (n_samples, n_features)
@@ -25,9 +27,9 @@ class LogisticRegression:
             self.bias -= self.learning_rate*grad_b
         
         predictions = self.predict(X)
-        accuracy = np.sum(predictions==y)/self.n_samples
         
-        return loss, accuracy
+        
+        return loss, getattr(metrics, self.metric)(predictions, y)
 
     def predict(self, X: np.ndarray, return_z: bool = False) -> np.ndarray:  
         # Return binary predictions (0 or 1) using learned weights and sigmoid  

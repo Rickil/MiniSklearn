@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 from typing import Deque
+from minisklearn import metrics
 
 class Condition:
     # Helper class store all split conditions informations
@@ -31,13 +32,14 @@ class TreeNode:
         return self.class_label != -1          
 
 class DecisionTree:  
-    def __init__(self, max_depth: int = 3, min_samples_split: int = 2, min_samples_leaf: int = 1, criterion: str = "gini"):  
+    def __init__(self, max_depth: int = 3, min_samples_split: int = 2, min_samples_leaf: int = 1, criterion: str = "gini", metric="accuracy"):  
         # Initialize tree constraints (depth, min samples to split)  
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
         self.root = None
         self.n_classes = 0
+        self.metric = metric
 
         criterions = {
             "gini": self._gini,
@@ -93,11 +95,9 @@ class DecisionTree:
         
         # Build the final tree
         self.root = self._build_prediction_tree(self.root)
-
         predictions = self.predict(X)
-        accuracy = np.sum(predictions==y)/len(y)
 
-        return accuracy
+        return getattr(metrics, self.metric)(predictions, y)
 
 
     def predict(self, X: np.ndarray) -> list:  
